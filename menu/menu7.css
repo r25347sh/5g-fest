@@ -1,0 +1,380 @@
+/* =========================================================
+   5G Fest — Velvet Presence
+   No long-press · No double-tap · No ugly button
+   Desktop: approach bottom edge
+   Mobile : elegant thin bottom indicator
+   Opera Pink #e95388
+   ========================================================= */
+
+:root {
+  --op: #e95388;
+  --op-soft: rgba(233, 83, 136, 0.55);
+  --text: #fff9fb;
+  --muted: rgba(255, 249, 251, 0.5);
+}
+
+/* ===== Bottom presence (the only trigger) ===== */
+.vp-presence {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 52px;
+  z-index: 10050;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  pointer-events: none;
+  cursor: pointer;
+}
+
+.vp-presence.is-active {
+  pointer-events: auto;
+}
+
+/* The soft rising light / bar */
+.vp-bar {
+  width: 120px;
+  height: 3px;
+  border-radius: 99px;
+  background: linear-gradient(90deg, transparent, var(--op), transparent);
+  box-shadow: 0 0 18px var(--op-soft), 0 0 40px rgba(233, 83, 136, 0.25);
+  opacity: 0;
+  transform: translateY(8px) scaleX(0.6);
+  transition:
+    opacity 0.45s ease,
+    transform 0.5s cubic-bezier(0.34, 1.4, 0.64, 1),
+    width 0.4s ease,
+    height 0.4s ease;
+  position: relative;
+}
+
+.vp-presence.is-near .vp-bar,
+.vp-presence.is-mobile .vp-bar {
+  opacity: 0.85;
+  transform: translateY(0) scaleX(1);
+}
+
+.vp-presence.is-near .vp-bar {
+  width: 160px;
+}
+
+.vp-presence.is-mobile .vp-bar {
+  width: 80px;
+  height: 3px;
+  opacity: 0.55;
+}
+
+.vp-presence.is-mobile:active .vp-bar,
+.vp-presence.is-near:hover .vp-bar {
+  width: 200px;
+  height: 4px;
+  opacity: 1;
+  box-shadow: 0 0 28px var(--op-soft), 0 0 60px rgba(233, 83, 136, 0.35);
+}
+
+/* Tiny label that appears only when near */
+.vp-label {
+  position: absolute;
+  bottom: 14px;
+  left: 50%;
+  transform: translateX(-50%) translateY(6px);
+  font-family: "Cinzel", serif;
+  font-size: 0.65rem;
+  letter-spacing: 0.35em;
+  color: rgba(255, 249, 251, 0.55);
+  opacity: 0;
+  transition: opacity 0.4s ease, transform 0.4s ease;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.vp-presence.is-near .vp-label {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+/* ===== Full stage ===== */
+.vp-stage {
+  position: fixed;
+  inset: 0;
+  z-index: 10040;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  visibility: hidden;
+}
+
+.vp-stage.is-open {
+  pointer-events: auto;
+  visibility: visible;
+}
+
+.vp-veil {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 90% 70% at 50% 30%, rgba(40, 12, 28, 0.5), transparent 70%),
+    radial-gradient(ellipse 100% 100% at 50% 50%, rgba(12, 5, 12, 0.75), rgba(4, 2, 6, 0.96));
+  backdrop-filter: blur(24px) saturate(1.25);
+  -webkit-backdrop-filter: blur(24px) saturate(1.25);
+  opacity: 0;
+  transition: opacity 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.vp-stage.is-open .vp-veil {
+  opacity: 1;
+}
+
+/* Decorative floating orbs */
+.vp-orb {
+  position: absolute;
+  border-radius: 50%;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 1s ease;
+}
+
+.vp-stage.is-open .vp-orb {
+  opacity: 1;
+}
+
+.vp-orb-1 {
+  width: 280px;
+  height: 280px;
+  background: radial-gradient(circle, rgba(233, 83, 136, 0.12), transparent 70%);
+  top: 10%;
+  left: 15%;
+  filter: blur(40px);
+  animation: vp-float 12s ease-in-out infinite;
+}
+
+.vp-orb-2 {
+  width: 200px;
+  height: 200px;
+  background: radial-gradient(circle, rgba(233, 83, 136, 0.09), transparent 70%);
+  bottom: 15%;
+  right: 10%;
+  filter: blur(36px);
+  animation: vp-float 15s ease-in-out infinite reverse;
+}
+
+/* Content */
+.vp-content {
+  position: relative;
+  z-index: 2;
+  text-align: center;
+  padding: 2rem;
+  max-width: 680px;
+  width: 100%;
+}
+
+.vp-brand {
+  font-family: "Cinzel", serif;
+  font-size: 0.7rem;
+  letter-spacing: 0.5em;
+  color: var(--op);
+  margin-bottom: 0.7rem;
+  opacity: 0;
+  transform: translateY(20px);
+  transition: opacity 0.55s ease, transform 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.vp-stage.is-open .vp-brand {
+  opacity: 1;
+  transform: translateY(0);
+  transition-delay: 0.1s;
+}
+
+.vp-title {
+  font-family: "Cinzel", "Playfair Display", serif;
+  font-size: clamp(2rem, 6vw, 3.1rem);
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  color: var(--text);
+  margin-bottom: 0.4rem;
+  opacity: 0;
+  transform: translateY(24px);
+  transition: opacity 0.6s ease, transform 0.65s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.vp-stage.is-open .vp-title {
+  opacity: 1;
+  transform: translateY(0);
+  transition-delay: 0.16s;
+}
+
+.vp-subtitle {
+  font-family: "Noto Sans JP", sans-serif;
+  font-size: 0.78rem;
+  letter-spacing: 0.25em;
+  color: var(--muted);
+  margin-bottom: 3rem;
+  opacity: 0;
+  transform: translateY(16px);
+  transition: opacity 0.5s ease, transform 0.55s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.vp-stage.is-open .vp-subtitle {
+  opacity: 1;
+  transform: translateY(0);
+  transition-delay: 0.22s;
+}
+
+/* Nav */
+.vp-nav {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.15rem;
+}
+
+.vp-link {
+  position: relative;
+  display: block;
+  padding: 0.95rem 2rem;
+  font-family: "Noto Sans JP", "Hiragino Sans", sans-serif;
+  font-size: clamp(1.35rem, 4vw, 1.9rem);
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  color: var(--text);
+  text-decoration: none;
+  opacity: 0;
+  transform: translateY(32px);
+  transition:
+    opacity 0.55s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.6s cubic-bezier(0.22, 1, 0.36, 1),
+    color 0.3s ease;
+}
+
+.vp-stage.is-open .vp-link {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.vp-stage.is-open .vp-link:nth-child(1) { transition-delay: 0.28s; }
+.vp-stage.is-open .vp-link:nth-child(2) { transition-delay: 0.35s; }
+.vp-stage.is-open .vp-link:nth-child(3) { transition-delay: 0.42s; }
+.vp-stage.is-open .vp-link:nth-child(4) { transition-delay: 0.49s; }
+.vp-stage.is-open .vp-link:nth-child(5) { transition-delay: 0.56s; }
+
+.vp-link::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: 0.55rem;
+  width: 0;
+  height: 1.5px;
+  background: var(--op);
+  transform: translateX(-50%);
+  transition: width 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+  box-shadow: 0 0 16px var(--op-soft);
+}
+
+.vp-link:hover {
+  color: #fff;
+}
+
+.vp-link:hover::after {
+  width: 55%;
+}
+
+.vp-link-en {
+  display: block;
+  font-size: 0.62rem;
+  letter-spacing: 0.28em;
+  color: var(--muted);
+  margin-top: 0.2rem;
+  text-transform: uppercase;
+  transition: color 0.3s ease;
+}
+
+.vp-link:hover .vp-link-en {
+  color: rgba(233, 83, 136, 0.9);
+}
+
+/* Close */
+.vp-close {
+  position: absolute;
+  top: 1.8rem;
+  right: 1.8rem;
+  width: 50px;
+  height: 50px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text);
+  font-size: 1.4rem;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  opacity: 0;
+  transform: scale(0.75) rotate(-30deg);
+  transition:
+    opacity 0.45s ease 0.3s,
+    transform 0.5s cubic-bezier(0.34, 1.4, 0.64, 1) 0.3s,
+    background 0.3s;
+  z-index: 3;
+}
+
+.vp-stage.is-open .vp-close {
+  opacity: 1;
+  transform: scale(1) rotate(0deg);
+}
+
+.vp-close:hover {
+  background: rgba(233, 83, 136, 0.18);
+  border-color: rgba(233, 83, 136, 0.4);
+}
+
+/* Hint */
+.vp-hint {
+  position: absolute;
+  bottom: 1.8rem;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: "Noto Sans JP", sans-serif;
+  font-size: 0.68rem;
+  letter-spacing: 0.2em;
+  color: rgba(255, 249, 251, 0.3);
+  opacity: 0;
+  transition: opacity 0.5s ease 0.55s;
+  pointer-events: none;
+}
+
+.vp-stage.is-open .vp-hint {
+  opacity: 1;
+}
+
+@keyframes vp-float {
+  0%, 100% { transform: translate(0, 0); }
+  50% { transform: translate(20px, -15px); }
+}
+
+/* Mobile adjustments */
+@media (max-width: 700px) {
+  .vp-presence {
+    height: 48px;
+  }
+  .vp-label {
+    display: none;
+  }
+  .vp-title {
+    margin-bottom: 0.3rem;
+  }
+  .vp-subtitle {
+    margin-bottom: 2.4rem;
+  }
+  .vp-link {
+    padding: 0.85rem 1.2rem;
+  }
+  .vp-close {
+    top: 1.2rem;
+    right: 1.2rem;
+    width: 46px;
+    height: 46px;
+  }
+}
