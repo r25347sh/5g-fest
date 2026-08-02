@@ -1,11 +1,10 @@
 /**
- * 5G Fest — Invisible Stage
- * No menu button. Ever.
+ * 5G Fest — Velvet Presence
+ * No long-press. No double-tap. No classic button.
  *
- * How to open:
- *   - Press "M" key
- *   - Long-press anywhere (desktop & mobile)
- *   - Double-tap (mobile)
+ * Desktop : move mouse near bottom edge → soft light appears → click
+ * Mobile  : elegant thin bottom indicator is always gently present → tap
+ * Keyboard: M key
  *
  * Opera Pink #e95388
  */
@@ -20,41 +19,48 @@
     { label: "トップへ", en: "Back to Top", href: "#", action: "scrollTop" }
   ];
 
-  const LONGPRESS_MS = 450;
-  const TIP_DELAY = 2400;
-  const TIP_DURATION = 5000;
+  const NEAR_ZONE = 70; // px from bottom
 
   function build() {
-    const stage = document.createElement("div");
-    stage.className = "iv-stage";
-    stage.setAttribute("role", "dialog");
-    stage.setAttribute("aria-modal", "true");
-    stage.setAttribute("aria-label", "ナビゲーション");
+    const isTouch = matchMedia("(hover: none), (pointer: coarse)").matches;
 
-    stage.innerHTML = `
-      <div class="iv-veil"></div>
-      <button class="iv-close" aria-label="閉じる">×</button>
-      <div class="iv-content">
-        <div class="iv-brand">5G FEST</div>
-        <h2 class="iv-title">キャバホスト</h2>
-        <nav class="iv-nav"></nav>
-      </div>
-      <div class="iv-hint">外側をクリック または ESC</div>
+    // Presence zone
+    const presence = document.createElement("div");
+    presence.className = "vp-presence";
+    if (isTouch) presence.classList.add("is-mobile", "is-active");
+    presence.innerHTML = `
+      <div class="vp-bar"></div>
+      <div class="vp-label">MENU</div>
     `;
 
-    const tip = document.createElement("div");
-    tip.className = "iv-tip";
-    tip.textContent = "M キー または 長押しでメニューを開けます";
+    // Stage
+    const stage = document.createElement("div");
+    stage.className = "vp-stage";
+    stage.setAttribute("role", "dialog");
+    stage.setAttribute("aria-modal", "true");
+    stage.innerHTML = `
+      <div class="vp-veil"></div>
+      <div class="vp-orb vp-orb-1"></div>
+      <div class="vp-orb vp-orb-2"></div>
+      <button class="vp-close" aria-label="閉じる">×</button>
+      <div class="vp-content">
+        <div class="vp-brand">5G FEST</div>
+        <h2 class="vp-title">キャバホスト</h2>
+        <div class="vp-subtitle">CLASS EXHIBITION</div>
+        <nav class="vp-nav"></nav>
+      </div>
+      <div class="vp-hint">外側をクリック · ESC</div>
+    `;
 
-    const nav = stage.querySelector(".iv-nav");
-    const veil = stage.querySelector(".iv-veil");
-    const closeBtn = stage.querySelector(".iv-close");
+    const nav = stage.querySelector(".vp-nav");
+    const veil = stage.querySelector(".vp-veil");
+    const closeBtn = stage.querySelector(".vp-close");
 
     ITEMS.forEach((item) => {
       const a = document.createElement("a");
-      a.className = "iv-link";
+      a.className = "vp-link";
       a.href = item.href;
-      a.innerHTML = `${item.label}<span class="iv-link-en">${item.en}</span>`;
+      a.innerHTML = `${item.label}<span class="vp-link-en">${item.en}</span>`;
 
       if (item.action === "scrollTop") {
         a.addEventListener("click", (e) => {
@@ -63,24 +69,20 @@
           window.scrollTo({ top: 0, behavior: "smooth" });
         });
       } else {
-        a.addEventListener("click", () => setTimeout(close, 90));
+        a.addEventListener("click", () => setTimeout(close, 80));
       }
       nav.appendChild(a);
     });
 
+    document.body.appendChild(presence);
     document.body.appendChild(stage);
-    document.body.appendChild(tip);
 
     let open = false;
-    let hasOpened = false;
-    let longPressTimer = null;
-    let lastTap = 0;
 
     function openMenu() {
       if (open) return;
       open = true;
-      hasOpened = true;
-      tip.classList.remove("is-show");
+      presence.classList.remove("is-near");
       stage.classList.add("is-open");
       document.body.style.overflow = "hidden";
     }
@@ -92,7 +94,26 @@
       document.body.style.overflow = "";
     }
 
-    // Close controls
+    // Desktop: proximity to bottom
+    if (!isTouch) {
+      window.addEventListener("mousemove", (e) => {
+        if (open) return;
+        const dist = window.innerHeight - e.clientY;
+        if (dist < NEAR_ZONE) {
+          presence.classList.add("is-near", "is-active");
+        } else {
+          presence.classList.remove("is-near", "is-active");
+        }
+      }, { passive: true });
+    }
+
+    // Click / tap the presence zone
+    presence.addEventListener("click", (e) => {
+      e.stopPropagation();
+      openMenu();
+    });
+
+    // Close
     closeBtn.addEventListener("click", close);
     veil.addEventListener("click", close);
 
@@ -111,65 +132,10 @@
       }
     });
 
-    // Long-press (desktop + mobile)
-    function startLongPress() {
-      clearTimeout(longPressTimer);
-      longPressTimer = setTimeout(() => {
-        openMenu();
-      }, LONGPRESS_MS);
-    }
-
-    function cancelLongPress() {
-      clearTimeout(longPressTimer);
-    }
-
-    // Desktop mouse long-press
-    let mouseDown = false;
-    window.addEventListener("mousedown", (e) => {
-      if (open || e.button !== 0) return;
-      mouseDown = true;
-      startLongPress();
-    });
-    window.addEventListener("mouseup", () => {
-      mouseDown = false;
-      cancelLongPress();
-    });
-    window.addEventListener("mousemove", () => {
-      if (mouseDown) cancelLongPress();
-    });
-
-    // Touch: long-press + double-tap
-    window.addEventListener("touchstart", (e) => {
-      if (open) return;
-
-      // double-tap
-      const now = Date.now();
-      if (now - lastTap < 300) {
-        cancelLongPress();
-        openMenu();
-        lastTap = 0;
-        return;
-      }
-      lastTap = now;
-
-      startLongPress();
-    }, { passive: true });
-
-    window.addEventListener("touchmove", cancelLongPress, { passive: true });
-    window.addEventListener("touchend", cancelLongPress, { passive: true });
-
     // Prevent scroll when open
     stage.addEventListener("touchmove", (e) => {
       if (open) e.preventDefault();
     }, { passive: false });
-
-    // First-visit tip
-    setTimeout(() => {
-      if (!hasOpened) {
-        tip.classList.add("is-show");
-        setTimeout(() => tip.classList.remove("is-show"), TIP_DURATION);
-      }
-    }, TIP_DELAY);
   }
 
   if (document.readyState === "loading") {
