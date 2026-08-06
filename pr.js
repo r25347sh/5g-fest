@@ -2,9 +2,11 @@
  * 5G Fest 限定公開ゲート（Ultra Luxury + Supabase Auth）
  * username: reitaku  /  password: hiroike2026
  *
- * - Supabase Auth (signInWithPassword)
- * - 「次回から自動でログイン」ON → localStorage + Supabase persistSession
- * - OFF → sessionStorage のみ
+ * 【ガチモン仕様】
+ * - Supabase Auth (signInWithPassword) が成功したときだけ入場可能
+ * - ローカルフォールバックなし（正しいパスでも Supabase 失敗なら拒否）
+ * - 既存セッションがある場合のみ自動通過
+ * - 「次回から自動でログイン」ON → Supabase persistSession + local フラグ
  *
  * セットアップ手順は SUPABASE.md を参照
  */
@@ -19,13 +21,10 @@
   const SUPABASE_ANON_KEY =
     "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5tZHZtbm5qd3BxY2l6aGN1cGt1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU5MjAzNjAsImV4cCI6MjEwMTQ5NjM2MH0.av37HMV2QmX511TUXMiT-nB5-RdHX3f3G9zooyy_Pnk";
 
-  // ユーザー名 → Supabase に登録するメールアドレスのマッピング
-  // （メール不要に見せるため、内部では固定メールを使用）
+  // ユーザー名 → Supabase に登録したメールアドレス
   const USER_MAP = {
     reitaku: "reitaku@5g-fest.local"
   };
-  const EXPECTED_USER = "reitaku";
-  const EXPECTED_PASS = "hiroike2026";
 
   const KEY_AUTH = "g5fest-pr-auth";
   const KEY_REMEMBER = "g5fest-pr-remember";
@@ -40,7 +39,8 @@
     "門番「もう一度、よく考えてみて」",
     "認証失敗。でも失敗はおもてなしの一部です。",
     "ヒントは出しません。それが5Gです。",
-    "キャバホストの世界は甘くない…再入力を。"
+    "キャバホストの世界は甘くない…再入力を。",
+    "Supabase が『違う』と言っています。"
   ];
 
   const STATUS_LINES = [
@@ -52,22 +52,7 @@
 
   let supabase = null;
 
-  // ========== ストレージ ==========
-  function isAuthenticatedLocal() {
-    try {
-      if (sessionStorage.getItem(KEY_SESSION) === "1") return true;
-      if (
-        localStorage.getItem(KEY_REMEMBER) === "1" &&
-        localStorage.getItem(KEY_AUTH) === "1"
-      ) {
-        return true;
-      }
-    } catch (e) {
-      /* private mode */
-    }
-    return false;
-  }
-
+  // ========== ストレージ（補助フラグ。本物の判定は Supabase セッション） ==========
   function markAuthenticated(remember) {
     try {
       sessionStorage.setItem(KEY_SESSION, "1");
@@ -159,67 +144,82 @@
       });
       return true;
     } catch (e) {
-      console.warn("[5G PR] Supabase init failed, fallback to local gate:", e);
+      console.error("[5G PR] Supabase init failed:", e);
       return false;
     }
   }
 
-  async function trySupabaseSession() {
+  /** ガチモン: 有効な Supabase セッションがあるか */
+  async function hasValidSupabaseSession() {
     if (!supabase) return false;
     try {
       var res = await supabase.auth.getSession();
-      if (res.data && res.data.session) {
-        markAuthenticated(true);
-        return true;
-      }
+      return !!(res.data && res.data.session);
     } catch (e) {
-      /* ignore */
+      return false;
     }
-    return false;
   }
 
+  /**
+   * ガチモン認証
+   * - Supabase signInWithPassword 成功時のみ ok: true
+   * - 失敗・SDK なし・通信エラーはすべて拒否
+   */
   async function authenticate(username, password, remember) {
-    // 1) ハードコードチェック（即時フィードバック用）
-    if (username !== EXPECTED_USER || password !== EXPECTED_PASS) {
+    if (!supabase) {
+      return {
+        ok: false,
+        reason: "sdk",
+        message: "認証サーバーに接続できません。しばらくしてから再試行してください。"
+      };
+    }
+
+    var email = USER_MAP[username];
+    if (!email) {
+      // 未知のユーザー名も一律「無効」扱い（ユーザー列挙を防ぐ）
       return { ok: false, reason: "invalid" };
     }
 
-    // 2) Supabase が使える場合は本物の Auth を試す
-    if (supabase) {
-      var email = USER_MAP[username] || username + "@5g-fest.local";
-      try {
-        var { data, error } = await supabase.auth.signInWithPassword({
-          email: email,
-          password: password
-        });
-        if (error) {
-          // ユーザー未作成時などはローカル成功にフォールバック
-          console.warn("[5G PR] Supabase signIn:", error.message);
-          markAuthenticated(remember);
-          return { ok: true, source: "local-fallback" };
-        }
-        if (data && data.session) {
-          markAuthenticated(remember);
-          if (!remember) {
-            // session only: 明示的に persist を弱める
-            // （Supabase は persistSession が true なので local フラグで制御）
-          }
-          return { ok: true, source: "supabase" };
-        }
-      } catch (e) {
-        console.warn("[5G PR] Supabase error:", e);
-        markAuthenticated(remember);
-        return { ok: true, source: "local-fallback" };
-      }
-    }
+    try {
+      var result = await supabase.auth.signInWithPassword({
+        email: email,
+        password: password
+      });
 
-    // 3) SDK なし / 失敗時も正しい資格情報なら通す
-    markAuthenticated(remember);
-    return { ok: true, source: "local" };
+      if (result.error) {
+        console.warn("[5G PR] Supabase signIn:", result.error.message);
+        return { ok: false, reason: "invalid" };
+      }
+
+      if (result.data && result.data.session) {
+        // remember OFF のときは persist を弱める（次回タブでは再ログイン）
+        if (!remember) {
+          try {
+            // session フラグのみ残し、local の remember は付けない
+            // Supabase トークンは persistSession:true なので storage に残るが、
+            // ログアウト or 明示的 clear で消せる。UX 用フラグは remember に従う。
+          } catch (e) {
+            /* ignore */
+          }
+        }
+        markAuthenticated(remember);
+        return { ok: true, source: "supabase" };
+      }
+
+      return { ok: false, reason: "invalid" };
+    } catch (e) {
+      console.error("[5G PR] Supabase error:", e);
+      return {
+        ok: false,
+        reason: "network",
+        message: "通信エラーです。ネットワークを確認して再試行してください。"
+      };
+    }
   }
 
   // ========== ゲート UI ==========
-  function showGate() {
+  function showGate(opts) {
+    opts = opts || {};
     lockBodyEarly();
     if (document.querySelector(".g5-pr-overlay")) return;
 
@@ -276,7 +276,12 @@
       var flash = overlay.querySelector(".g5-pr-flash");
 
       var statusIdx = 0;
-      statusEl.textContent = STATUS_LINES[0];
+      if (opts.initError) {
+        statusEl.textContent = opts.initError;
+        errorEl.textContent = opts.initError;
+      } else {
+        statusEl.textContent = STATUS_LINES[0];
+      }
       var statusTimer = setInterval(function () {
         statusIdx = (statusIdx + 1) % STATUS_LINES.length;
         statusEl.textContent = STATUS_LINES[statusIdx];
@@ -306,10 +311,7 @@
         if (result.ok) {
           clearInterval(statusTimer);
           errorEl.textContent = "";
-          statusEl.textContent =
-            result.source === "supabase"
-              ? "認証成功 — VIPルームへようこそ"
-              : "認証成功 — 門が開きます";
+          statusEl.textContent = "認証成功 — VIPルームへようこそ";
           submitBtn.classList.add("is-success");
           submitBtn.textContent = "ようこそ、5Gへ";
           if (flash) {
@@ -323,12 +325,17 @@
         } else {
           submitBtn.disabled = false;
           failCount++;
-          var line = FAIL_LINES[Math.floor(Math.random() * FAIL_LINES.length)];
-          if (failCount >= 3) {
+          var line =
+            result.message ||
+            FAIL_LINES[Math.floor(Math.random() * FAIL_LINES.length)];
+          if (failCount >= 3 && !result.message) {
             line = "連続失敗 " + failCount + " 回。深呼吸してから再挑戦を。";
           }
           errorEl.textContent = line;
-          statusEl.textContent = "認証失敗ログを記録しました…（気のせい）";
+          statusEl.textContent =
+            result.reason === "network" || result.reason === "sdk"
+              ? "接続に問題があります"
+              : "認証失敗ログを記録しました…（気のせい）";
           passInput.value = "";
           passInput.classList.remove("is-shake");
           void passInput.offsetWidth;
@@ -361,33 +368,39 @@
       }
       location.reload();
     },
-    isAuthenticated: isAuthenticatedLocal
+    /** ガチモン: 現在有効な Supabase セッションがあるか（async） */
+    isAuthenticated: async function () {
+      if (!supabase) {
+        var ok = await initSupabase();
+        if (!ok) return false;
+      }
+      return hasValidSupabaseSession();
+    }
   };
 
-  // ========== Boot ==========
+  // ========== Boot（ガチモン: Supabase セッション必須） ==========
   (async function boot() {
-    // ローカルフラグがあれば即通過（UX優先）
-    if (isAuthenticatedLocal()) {
-      document.documentElement.classList.remove("g5-pr-locked");
-      // 裏で Supabase セッションも確認（任意）
-      initSupabase().then(function (ok) {
-        if (ok) trySupabaseSession();
+    lockBodyEarly();
+
+    var ready = await initSupabase();
+    if (!ready) {
+      showGate({
+        initError:
+          "認証サーバーに接続できません。ネットワークを確認してください。"
       });
       return;
     }
 
-    lockBodyEarly();
-
-    // Supabase 初期化を待ってからセッション確認
-    var ready = await initSupabase();
-    if (ready) {
-      var hasSession = await trySupabaseSession();
-      if (hasSession) {
-        unlock();
-        return;
-      }
+    var hasSession = await hasValidSupabaseSession();
+    if (hasSession) {
+      // 既存の本物セッションあり → 通過
+      markAuthenticated(true);
+      unlock();
+      return;
     }
 
+    // ローカルフラグだけ残っていても無効（古いフォールバック残骸を掃除）
+    clearAuth();
     showGate();
   })();
 })();
