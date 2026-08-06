@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="description" content="5G Fest「キャバホスト」メンバー紹介">
+  <style>#loading-overlay{position:fixed;top:0;left:0;width:100vw;height:100vh;background:#fff;color:#333;display:flex;justify-content:center;align-items:center;font-size:24px;font-family:sans-serif;z-index:9999;}</style>
   <title>メンバー紹介｜5G Fest キャバホスト</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -11,6 +12,7 @@
   <script src="/5g-fest/js/load.js"></script>
 </head>
 <body>
+  <div id="loading-overlay">Loading...</div>
 
   <header class="member-hero">
     <div class="hero-badge">Cast Members</div>
@@ -136,6 +138,11 @@
       <a href="/5g-fest/" style="color: var(--pink);">← ホームに戻る</a>
     </p>
   </footer>
-
+  <script>
+    window.addEventListener('load', function() {
+      const overlay = document.getElementById('loading-overlay');
+      overlay.style.display = 'none';
+    });
+  </script>
 </body>
 </html>
