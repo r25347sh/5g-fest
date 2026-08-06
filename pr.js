@@ -4,11 +4,11 @@
  *
  * 【ガチモン仕様】
  * - Supabase Auth (signInWithPassword) が成功したときだけ入場可能
- * - ローカルフォールバックなし（正しいパスでも Supabase 失敗なら拒否）
+ * - ローカルフォールバックなし
  * - 既存セッションがある場合のみ自動通過
- * - 「次回から自動でログイン」ON → Supabase persistSession + local フラグ
  *
  * セットアップ手順は SUPABASE.md を参照
+ * ※ Authentication → Providers → Email を必ず Enable すること
  */
 (function () {
   "use strict";
@@ -52,7 +52,7 @@
 
   let supabase = null;
 
-  // ========== ストレージ（補助フラグ。本物の判定は Supabase セッション） ==========
+  // ========== ストレージ ==========
   function markAuthenticated(remember) {
     try {
       sessionStorage.setItem(KEY_SESSION, "1");
@@ -112,17 +112,49 @@
     }
   }
 
+  function humanizeAuthError(msg, code) {
+    var m = (msg || "").toLowerCase();
+    var c = (code || "").toLowerCase();
+    if (
+      c === "email_provider_disabled" ||
+      m.indexOf("email logins are disabled") !== -1 ||
+      m.indexOf("email provider") !== -1
+    ) {
+      return "Email ログインが無効です。Supabase → Authentication → Providers → Email を Enable してください。";
+    }
+    if (c === "email_not_confirmed" || m.indexOf("not confirmed") !== -1) {
+      return "メール未確認です。Supabase で Auto Confirm するか Confirm email を OFF にしてください。";
+    }
+    if (
+      c === "invalid_credentials" ||
+      m.indexOf("invalid login") !== -1 ||
+      m.indexOf("invalid credentials") !== -1
+    ) {
+      return null; // ランダム FAIL_LINES を使う
+    }
+    if (m) return "認証エラー: " + msg;
+    return null;
+  }
+
   // ========== Supabase ==========
+  // 必ず UMD ビルドを使う（通常の package 入口は ESM で window.supabase が付かない）
   function loadSupabaseSdk() {
     return new Promise(function (resolve, reject) {
-      if (window.supabase && window.supabase.createClient) {
+      if (window.supabase && typeof window.supabase.createClient === "function") {
         resolve(window.supabase);
         return;
       }
       var s = document.createElement("script");
-      s.src = "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2";
+      s.src =
+        "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.1/dist/umd/supabase.min.js";
+      s.async = true;
       s.onload = function () {
-        resolve(window.supabase);
+        // UMD は window.supabase に載る
+        if (window.supabase && typeof window.supabase.createClient === "function") {
+          resolve(window.supabase);
+        } else {
+          reject(new Error("Supabase UMD loaded but createClient missing"));
+        }
       };
       s.onerror = function () {
         reject(new Error("Supabase SDK load failed"));
@@ -142,6 +174,7 @@
           storageKey: "g5fest-sb-auth"
         }
       });
+      console.log("[5G PR] Supabase client ready");
       return true;
     } catch (e) {
       console.error("[5G PR] Supabase init failed:", e);
@@ -149,7 +182,6 @@
     }
   }
 
-  /** ガチモン: 有効な Supabase セッションがあるか */
   async function hasValidSupabaseSession() {
     if (!supabase) return false;
     try {
@@ -161,54 +193,101 @@
   }
 
   /**
-   * ガチモン認証
-   * - Supabase signInWithPassword 成功時のみ ok: true
-   * - 失敗・SDK なし・通信エラーはすべて拒否
+   * ガチモン認証（SDK 優先、失敗時は Auth REST に直接 POST）
    */
   async function authenticate(username, password, remember) {
-    if (!supabase) {
-      return {
-        ok: false,
-        reason: "sdk",
-        message: "認証サーバーに接続できません。しばらくしてから再試行してください。"
-      };
-    }
-
     var email = USER_MAP[username];
     if (!email) {
-      // 未知のユーザー名も一律「無効」扱い（ユーザー列挙を防ぐ）
       return { ok: false, reason: "invalid" };
     }
 
-    try {
-      var result = await supabase.auth.signInWithPassword({
-        email: email,
-        password: password
-      });
+    // --- 1) SDK 経由 ---
+    if (supabase) {
+      try {
+        console.log("[5G PR] signInWithPassword →", email);
+        var result = await supabase.auth.signInWithPassword({
+          email: email,
+          password: password
+        });
 
-      if (result.error) {
-        console.warn("[5G PR] Supabase signIn:", result.error.message);
+        if (result.error) {
+          console.warn("[5G PR] Supabase signIn error:", result.error);
+          var human = humanizeAuthError(
+            result.error.message,
+            result.error.code || result.error.error_code
+          );
+          return {
+            ok: false,
+            reason: "auth",
+            message: human
+          };
+        }
+
+        if (result.data && result.data.session) {
+          markAuthenticated(remember);
+          console.log("[5G PR] Auth OK (SDK)");
+          return { ok: true, source: "supabase" };
+        }
+
         return { ok: false, reason: "invalid" };
+      } catch (e) {
+        console.error("[5G PR] SDK signIn threw:", e);
+        // fall through to REST
+      }
+    }
+
+    // --- 2) REST 直接（SDK 不通時の診断＆実ログイン） ---
+    try {
+      console.log("[5G PR] REST token →", email);
+      var res = await fetch(
+        SUPABASE_URL + "/auth/v1/token?grant_type=password",
+        {
+          method: "POST",
+          headers: {
+            apikey: SUPABASE_ANON_KEY,
+            Authorization: "Bearer " + SUPABASE_ANON_KEY,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ email: email, password: password })
+        }
+      );
+      var body = await res.json().catch(function () {
+        return {};
+      });
+      console.log("[5G PR] REST status", res.status, body);
+
+      if (!res.ok) {
+        var human2 = humanizeAuthError(
+          body.msg || body.error_description || body.error,
+          body.error_code || body.code
+        );
+        return {
+          ok: false,
+          reason: "auth",
+          message: human2
+        };
       }
 
-      if (result.data && result.data.session) {
-        // remember OFF のときは persist を弱める（次回タブでは再ログイン）
-        if (!remember) {
+      if (body.access_token) {
+        // SDK があればセッションをセット、なければ local フラグのみ（次回 getSession 用に SDK へ渡す）
+        if (supabase && supabase.auth && supabase.auth.setSession) {
           try {
-            // session フラグのみ残し、local の remember は付けない
-            // Supabase トークンは persistSession:true なので storage に残るが、
-            // ログアウト or 明示的 clear で消せる。UX 用フラグは remember に従う。
+            await supabase.auth.setSession({
+              access_token: body.access_token,
+              refresh_token: body.refresh_token
+            });
           } catch (e) {
-            /* ignore */
+            console.warn("[5G PR] setSession failed:", e);
           }
         }
         markAuthenticated(remember);
-        return { ok: true, source: "supabase" };
+        console.log("[5G PR] Auth OK (REST)");
+        return { ok: true, source: "supabase-rest" };
       }
 
       return { ok: false, reason: "invalid" };
     } catch (e) {
-      console.error("[5G PR] Supabase error:", e);
+      console.error("[5G PR] REST error:", e);
       return {
         ok: false,
         reason: "network",
@@ -335,7 +414,7 @@
           statusEl.textContent =
             result.reason === "network" || result.reason === "sdk"
               ? "接続に問題があります"
-              : "認証失敗ログを記録しました…（気のせい）";
+              : "認証失敗";
           passInput.value = "";
           passInput.classList.remove("is-shake");
           void passInput.offsetWidth;
@@ -368,7 +447,6 @@
       }
       location.reload();
     },
-    /** ガチモン: 現在有効な Supabase セッションがあるか（async） */
     isAuthenticated: async function () {
       if (!supabase) {
         var ok = await initSupabase();
@@ -378,7 +456,7 @@
     }
   };
 
-  // ========== Boot（ガチモン: Supabase セッション必須） ==========
+  // ========== Boot ==========
   (async function boot() {
     lockBodyEarly();
 
@@ -393,13 +471,11 @@
 
     var hasSession = await hasValidSupabaseSession();
     if (hasSession) {
-      // 既存の本物セッションあり → 通過
       markAuthenticated(true);
       unlock();
       return;
     }
 
-    // ローカルフラグだけ残っていても無効（古いフォールバック残骸を掃除）
     clearAuth();
     showGate();
   })();
